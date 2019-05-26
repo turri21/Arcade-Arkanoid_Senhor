@@ -27,22 +27,22 @@ echo.
 
 if NOT EXIST %zip1% GOTO ERRORZIP1
 if NOT EXIST %zip2% GOTO ERRORZIP2
-if NOT EXIST !pwd!7za.exe GOTO ERROR7Z
+if NOT EXIST %pwd%7za.exe GOTO ERROR7Z
 
-!pwd!7za x -y -otmp %zip1%
-!pwd!7za x -y -otmp %zip2%
+"%pwd%7za" x -y -otmp %zip1%
+"%pwd%7za" x -y -otmp %zip2%
 	if !ERRORLEVEL! EQU 0 ( 
 		cd tmp
-		copy /b/y %ifiles% !pwd!%ofile%
+		copy /b/y %ifiles% "%pwd%%ofile%"
 			if !ERRORLEVEL! EQU 0 ( 
-				cd !pwd!
+				cd "%pwd%"
 					if "%patchfile%" NEQ "" (
 						flips.exe %patchfile% %ofile%
 					)
 				
 				set "md5="
-				echo certutil -hashfile "!pwd!%ofile%" MD5
-					for /f "skip=1 tokens=* delims=" %%# in ('certutil -hashfile "!pwd!%ofile%" MD5') do (
+				echo certutil -hashfile "%pwd%%ofile%" MD5
+					for /f "skip=1 tokens=* delims=" %%# in ('certutil -hashfile "%pwd%%ofile%" MD5') do (
 						if not defined md5 (
 							for %%Z in (%%#) do  (
 								set "md5=%%Z"
@@ -65,7 +65,7 @@ if NOT EXIST !pwd!7za.exe GOTO ERROR7Z
 					echo MD5 is "!md5!" but should be "%md5valid%"
 				)
 			)
-		cd !pwd!
+		cd "%pwd%"
 		rmdir /s /q tmp	
 		GOTO END		
 	)
