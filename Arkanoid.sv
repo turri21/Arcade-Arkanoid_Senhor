@@ -37,7 +37,7 @@ module emu
 	input         RESET,
 
 	//Must be passed to hps_io module
-	inout  [44:0] HPS_BUS,
+	inout  [45:0] HPS_BUS,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        VGA_CLK,
@@ -52,6 +52,7 @@ module emu
 	output        VGA_HS,
 	output        VGA_VS,
 	output        VGA_DE,    // = ~(VBlank | HBlank)
+	output        VGA_F1,
 
 	//Base video clock. Usually equals to CLK_SYS.
 	output        HDMI_CLK,
@@ -82,19 +83,34 @@ module emu
 
 	output [15:0] AUDIO_L,
 	output [15:0] AUDIO_R,
-	output        AUDIO_S    // 1 - signed audio samples, 0 - unsigned
+	output        AUDIO_S,    // 1 - signed audio samples, 0 - unsigned
+
+	// Open-drain User port.
+	// 0 - D+/RX
+	// 1 - D-/TX
+	// 2..6 - USR2..USR6
+	// Set USER_OUT to 1 to read from USER_IN.
+	input   [6:0] USER_IN,
+	output  [6:0] USER_OUT
 );
+
+assign VGA_F1    = 0;
+assign USER_OUT  = '1;
 
 assign LED_USER  = ioctl_download;
 assign LED_DISK  = 0;
 assign LED_POWER = 0;
 
-assign HDMI_ARX = status[13] ? 8'd4 : 8'd3;
-assign HDMI_ARY = status[13] ? 8'd3 : 8'd4;
+assign HDMI_ARX = status[14] ? 8'd16 : status[13] ? 8'd4 : 8'd3;
+assign HDMI_ARY = status[14] ? 8'd9  : status[13] ? 8'd3 : 8'd4;
 
 `include "build_id.v"
 parameter CONF_STR = {
 	"A.ARKANOID;;",
+	"-;",
+	"H0OE,Aspect Ratio,Original,Wide;",
+	"H0OD,Orientation,Vert,Horz;",
+	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
 	"O12,Credits,1 coin 1 credit,2 coins 1 credit,1 coin 2 credits,1 coin 6 credits;",
 	"O3,Lives,3,5;",
@@ -105,10 +121,8 @@ parameter CONF_STR = {
 	"O8,Continues,On,Off;",
 	"OC,Sound chip,YM2149,AY-3-8910;",
 	"-;",
-	"OD,Orientation,Vert,Horz;",
-	"-;",
 	"R0,Reset;",
-	"J,Fire,Fast,P1 Start,P1 Coin,P2 Start,P2 Coin;",
+	"J1,Fire,Fast,Start P1,Coin,Start P2;",
 	"V,v",`BUILD_DATE
 };
 
@@ -116,6 +130,8 @@ parameter CONF_STR = {
 
 wire [31:0] status;
 wire  [1:0] buttons;
+wire        forced_scandoubler;
+wire        direct_video;
 
 wire        ioctl_download;
 wire        ioctl_wr;
@@ -124,10 +140,10 @@ wire  [7:0] ioctl_dout;
 
 wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
+wire [15:0] joystick_0, joystick_1;
+wire [15:0] joy = joystick_0 | joystick_1;
 
-wire [15:0] joy0;
-
-wire        forced_scandoubler;
+wire [21:0] gamma_bus;
 
 hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
@@ -138,14 +154,18 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
+	.status_menumask(direct_video),
 	.forced_scandoubler(forced_scandoubler),
+	.gamma_bus(gamma_bus),
+	.direct_video(direct_video),
 
 	.ioctl_download(ioctl_download),
 	.ioctl_wr(ioctl_wr),
 	.ioctl_addr(ioctl_addr),
 	.ioctl_dout(ioctl_dout),
 
-	.joystick_0(joy0),
+	.joystick_0(joystick_0),
+	.joystick_1(joystick_1),
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse)
 );
@@ -155,6 +175,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 wire CLK_6M;
 wire CLK_12M;
 wire CLK_24M;
+wire CLK_48M;
 wire LOCKED;
 wire MOUSE_CLK;
 
@@ -164,7 +185,8 @@ pll pll
     .outclk_0(CLK_6M),
     .outclk_1(CLK_12M),
     .outclk_2(CLK_24M),
-    .outclk_5(MOUSE_CLK),
+    .outclk_3(CLK_48M),
+    .outclk_6(MOUSE_CLK),
     .locked(LOCKED)
 );
 
@@ -221,9 +243,9 @@ begin
         else position = mouse_x;
     end
 
-	if (joy0[0] | joy0[1]) begin // 0.167us per cycle
+	if (joy[0] | joy[1]) begin // 0.167us per cycle
 		if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
-			position <= joy0[0] ? (joy0[5] ? 12'd9 : 12'd4) : (joy0[5] ? -12'd9 : -12'd4);
+			position <= joy[0] ? (joy[5] ? 12'd9 : 12'd4) : (joy[5] ? -12'd9 : -12'd4);
 			spin_counter <= 0;
 		end else begin
 			spin_counter <= spin_counter + 1'b1;
@@ -302,21 +324,28 @@ wire hblank, vblank;
 wire hs, vs;
 wire [3:0] r,g,b;
 
+reg ce_pix;
+always @(posedge CLK_48M) begin
+	reg [2:0] div;
+	
+	div <= div + 1'd1;
+	ce_pix <= !div;
+end
+
 arcade_rotate_fx #(258,225,12,0) arcade_video
 (
 	.*,
 
-	.clk_video(CLK_12M),
-	.ce_pix(CLK_6M),
+	.clk_video(CLK_48M),
 
 	.RGB_in({r,g,b}),
 	.HBlank(~hblank),
 	.VBlank(~vblank),
 	.HSync(hs),
 	.VSync(~vs),
-	
-	.fx(3'b000),
-	.no_rotate(status[13])
+
+	.fx(status[17:15]),
+	.no_rotate(status[13] & ~direct_video)
 );
 
 //Instantiate Arkanoid top-level module
@@ -329,17 +358,17 @@ arkanoid arkanoid_inst
 
 	.spinner(spinner_encoder),		// input [1:0] spinner
 	
-	.coin1(coin1 | joy0[7]),		// input coin1
-	.coin2(coin2 | joy0[9]),		// input coin2
+	.coin1(coin1 | joy[7]),		   // input coin1
+	.coin2(coin2),	         	   // input coin2
 	
-	.btn_shot(btn_shot & ~joy0[4]),				// input btn_shot
+	.btn_shot(btn_shot & ~joy[4]),// input btn_shot
 	.btn_service(btn_service),		// input btn_service
 	
 	.tilt(tilt),						// input tilt
 	
-	.btn_1p_start(btn_1p_start & ~joy0[6]),	// input btn_1p_start
-	.btn_2p_start(btn_2p_start & ~joy0[8]),	// input btn_2p_start
-	
+	.btn_1p_start(btn_1p_start & ~joy[6]),	// input btn_1p_start
+	.btn_2p_start(btn_2p_start & ~joy[8]),	// input btn_2p_start
+
 	.dip_sw(dip_sw),					// input [7:0] dip_sw
 	
 	.sound(audio),						// output [7:0] sound
