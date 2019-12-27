@@ -37,7 +37,6 @@ port
 	btn_shot, btn_service, tilt	: in std_logic;
 	btn_1p_start, btn_2p_start		: in std_logic;
 	
-	clk_24m								: in std_logic;
 	clk_12m								: in std_logic;
 	ym2149_clk_div						: in std_logic;
 	dip_sw								: in std_logic_vector(7 downto 0);
@@ -928,7 +927,7 @@ begin
 	port map
 	(
 		addr => prom_addr,
-		clk => clk_24m,
+		clk => clk_12m,
 		data => prom3_data,
 		addr_dl => ioctl_addr,
 		clk_dl => clk_12m,
@@ -941,7 +940,7 @@ begin
 	port map
 	(
 		addr => prom_addr,
-		clk => clk_24m,
+		clk => clk_12m,
 		data => prom2_data,
 		addr_dl => ioctl_addr,
 		clk_dl => clk_12m,
@@ -954,7 +953,7 @@ begin
 	port map
 	(
 		addr => prom_addr,
-		clk => clk_24m,
+		clk => clk_12m,
 		data => prom1_data,
 		addr_dl => ioctl_addr,
 		clk_dl => clk_12m,

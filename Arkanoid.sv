@@ -172,22 +172,14 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 ////////////////////   CLOCKS   ///////////////////
 
-wire CLK_6M;
 wire CLK_12M;
-wire CLK_24M;
 wire CLK_48M;
-wire LOCKED;
-wire MOUSE_CLK;
 
 pll pll
 (
     .refclk(CLK_50M),
-    .outclk_0(CLK_6M),
-    .outclk_1(CLK_12M),
-    .outclk_2(CLK_24M),
-    .outclk_3(CLK_48M),
-    .outclk_6(MOUSE_CLK),
-    .locked(LOCKED)
+    .outclk_0(CLK_12M),
+    .outclk_1(CLK_48M)
 );
 
 wire reset = buttons[1] | status[0] | ioctl_download;
@@ -198,60 +190,59 @@ logic [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type enc
 
 wire signed [8:0] mouse_x_in = $signed({ps2_mouse[4], ps2_mouse[15:8]});
 
-always_ff @(posedge CLK_6M)
-begin
-    reg old_state;
-    reg old_mouse_clk;
+always @(posedge CLK_12M) begin
+	reg old_state;
 	integer spin_counter;
 
-    reg signed  [8:0] mouse_x = 0;
+	reg signed  [8:0] mouse_x = 0;
 
-    logic signed [11:0] position = 0;
+	logic signed [11:0] position = 0;
+	reg        ce_6m;
+	reg [11:0] div_4k;
 
-    old_state <= ps2_mouse[24];    
-    old_mouse_clk <= MOUSE_CLK;
-    mouse_x <= mouse_x_in;
-    
-    if(position != 0) //we need to drive position to 0 still;
-    begin
-        if(MOUSE_CLK & (old_mouse_clk != MOUSE_CLK))
-        begin
-            case({position[11] , spinner_encoder})
-                {1'b1, 2'b00}: spinner_encoder <= 2'b01;
-                {1'b1, 2'b01}: spinner_encoder <= 2'b11;
-                {1'b1, 2'b11}: spinner_encoder <= 2'b10;
-                {1'b1, 2'b10}: spinner_encoder <= 2'b00;
-                {1'b0, 2'b00}: spinner_encoder <= 2'b10;
-                {1'b0, 2'b10}: spinner_encoder <= 2'b11;
-                {1'b0, 2'b11}: spinner_encoder <= 2'b01;
-                {1'b0, 2'b01}: spinner_encoder <= 2'b00;
-            endcase
-            if(position[11])
-            begin
-                position = position + 1'b1;
-            end
-            else 
-            begin
-                position = position - 1'b1;
-            end
-        end
-    end
+	ce_6m <= ~ce_6m;
+	
+	if(ce_6m) begin
+	
+		div_4k <= div_4k + 1'd1;
+		if(div_4k == 1499) div_4k <= 0;
 
-    if(ps2_mouse[24] & (old_state != ps2_mouse[24]))
-    begin
-        if({position[11], mouse_x[8]}) position = position + mouse_x;
-        else position = mouse_x;
-    end
+		old_state <= ps2_mouse[24];    
+		mouse_x <= mouse_x_in;
 
-	if (joy[0] | joy[1]) begin // 0.167us per cycle
-		if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
-			position <= joy[0] ? (joy[5] ? 12'd9 : 12'd4) : (joy[5] ? -12'd9 : -12'd4);
-			spin_counter <= 0;
-		end else begin
-			spin_counter <= spin_counter + 1'b1;
+		if(position != 0) begin //we need to drive position to 0 still;
+			if(!div_4k) begin
+				case({position[11] , spinner_encoder})
+					{1'b1, 2'b00}: spinner_encoder <= 2'b01;
+					{1'b1, 2'b01}: spinner_encoder <= 2'b11;
+					{1'b1, 2'b11}: spinner_encoder <= 2'b10;
+					{1'b1, 2'b10}: spinner_encoder <= 2'b00;
+					{1'b0, 2'b00}: spinner_encoder <= 2'b10;
+					{1'b0, 2'b10}: spinner_encoder <= 2'b11;
+					{1'b0, 2'b11}: spinner_encoder <= 2'b01;
+					{1'b0, 2'b01}: spinner_encoder <= 2'b00;
+				endcase
+				
+				if(position[11]) position = position + 1'b1;
+				else position = position - 1'b1;
+		  end
 		end
-	end else begin
-		spin_counter <= 0;
+
+		if(ps2_mouse[24] & (old_state != ps2_mouse[24])) begin
+			if({position[11], mouse_x[8]}) position = position + mouse_x;
+			else position = mouse_x;
+		end
+
+		if (joy[0] | joy[1]) begin // 0.167us per cycle
+			if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
+				position <= joy[0] ? (joy[5] ? 12'd9 : 12'd4) : (joy[5] ? -12'd9 : -12'd4);
+				spin_counter <= 0;
+			end else begin
+				spin_counter <= spin_counter + 1'b1;
+			end
+		end else begin
+			spin_counter <= 0;
+		end
 	end
 end
 
@@ -332,7 +323,7 @@ always @(posedge CLK_48M) begin
 	ce_pix <= !div;
 end
 
-arcade_rotate_fx #(258,225,12,0) arcade_video
+arcade_rotate_fx #(256,224,12,0) arcade_video
 (
 	.*,
 
@@ -353,7 +344,6 @@ arkanoid arkanoid_inst
 (
 	.reset(~reset),					// input reset
 
-	.clk_24m(CLK_24M) ,				// input clk_24m
 	.clk_12m(CLK_12M),				// input clk_12m
 
 	.spinner(spinner_encoder),		// input [1:0] spinner
