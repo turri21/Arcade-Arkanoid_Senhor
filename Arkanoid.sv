@@ -123,6 +123,7 @@ parameter CONF_STR = {
 	"-;",
 	"R0,Reset;",
 	"J1,Fire,Fast,Start P1,Coin,Start P2;",
+	"jn,A,B,Start,R,Select;",
 	"V,v",`BUILD_DATE
 };
 
@@ -323,7 +324,7 @@ always @(posedge CLK_48M) begin
 	ce_pix <= !div;
 end
 
-arcade_rotate_fx #(256,224,12,0) arcade_video
+arcade_video #(256,224,12) arcade_video
 (
 	.*,
 
@@ -336,7 +337,8 @@ arcade_rotate_fx #(256,224,12,0) arcade_video
 	.VSync(~vs),
 
 	.fx(status[17:15]),
-	.no_rotate(status[13] & ~direct_video)
+	.rotate_ccw(0),
+	.no_rotate(status[13] | direct_video)
 );
 
 //Instantiate Arkanoid top-level module
