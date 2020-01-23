@@ -107,10 +107,11 @@ assign HDMI_ARY = status[14] ? 8'd9  : status[13] ? 8'd3 : 8'd4;
 `include "build_id.v"
 parameter CONF_STR = {
 	"A.ARKANOID;;",
-	"-;",
 	"H0OE,Aspect Ratio,Original,Wide;",
 	"H0OD,Orientation,Vert,Horz;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
+	"-;",
+	"OIJ,Pad Control,Buttons,HiRes Spinner,Medium Spinner,LoRes Spinner;",
 	"-;",
 	"O12,Credits,1 coin 1 credit,2 coins 1 credit,1 coin 2 credits,1 coin 6 credits;",
 	"O3,Lives,3,5;",
@@ -178,9 +179,9 @@ wire CLK_48M;
 
 pll pll
 (
-    .refclk(CLK_50M),
-    .outclk_0(CLK_12M),
-    .outclk_1(CLK_48M)
+	.refclk(CLK_50M),
+	.outclk_0(CLK_12M),
+	.outclk_1(CLK_48M)
 );
 
 wire reset = buttons[1] | status[0] | ioctl_download;
@@ -191,8 +192,12 @@ logic [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type enc
 
 wire signed [8:0] mouse_x_in = $signed({ps2_mouse[4], ps2_mouse[15:8]});
 
+wire [11:0] spres = 12'd2<<(status[19:18] - !m_fast);
+
+reg use_io = 0; // 1 - use encoder on USER_IN[1:0] pins
 always @(posedge CLK_12M) begin
 	reg old_state;
+	reg [1:0] old_io;
 	integer spin_counter;
 
 	reg signed  [8:0] mouse_x = 0;
@@ -224,19 +229,23 @@ always @(posedge CLK_12M) begin
 					{1'b0, 2'b01}: spinner_encoder <= 2'b00;
 				endcase
 				
-				if(position[11]) position = position + 1'b1;
-				else position = position - 1'b1;
-		  end
+				if(position[11]) position <= position + 1'b1;
+				else position <= position - 1'b1;
+			end
 		end
 
 		if(ps2_mouse[24] & (old_state != ps2_mouse[24])) begin
-			if({position[11], mouse_x[8]}) position = position + mouse_x;
-			else position = mouse_x;
+			if({position[11], mouse_x[8]}) position <= position + mouse_x;
+			else position <= mouse_x;
+			use_io <= 0;
 		end
 
-		if (joy[0] | joy[1]) begin // 0.167us per cycle
-			if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
-				position <= joy[0] ? (joy[5] ? 12'd9 : 12'd4) : (joy[5] ? -12'd9 : -12'd4);
+		if (m_left | m_right) begin // 0.167us per cycle
+			use_io <= 0;
+			if(status[19:18]) begin
+				position <= m_right ? spres : -spres;
+			end else if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
+				position <= m_right ? (m_fast ? 12'd9 : 12'd4) : (m_fast ? -12'd9 : -12'd4);
 				spin_counter <= 0;
 			end else begin
 				spin_counter <= spin_counter + 1'b1;
@@ -245,37 +254,54 @@ always @(posedge CLK_12M) begin
 			spin_counter <= 0;
 		end
 	end
+
+	old_io <= USER_IN[1:0];
+	if(old_io != USER_IN[1:0]) use_io <= 1;
 end
 
 ///////////////////         Keyboard           //////////////////
 
+reg btn_fire  = 0;
+reg btn_left  = 0;
+reg btn_right = 0;
+reg btn_fast  = 0;
+reg btn_coin1 = 0;
+reg btn_coin2 = 0;
+reg btn_service  = 0;
+reg btn_1p_start = 0;
+reg btn_2p_start = 0;
+
 wire pressed = ps2_key[9];
-wire [8:0] code = ps2_key[8:0];
+wire [7:0] code = ps2_key[7:0];
 always @(posedge CLK_12M) begin
 	reg old_state;
 	old_state <= ps2_key[10];
 	if(old_state != ps2_key[10]) begin
-		casex(code)
-			'h016: btn_1p_start <= ~pressed;	// 1
-			'h01E: btn_2p_start <= ~pressed;	// 2
-			'h02E: coin1 <= pressed;			// 5
-			'h036: coin2 <= pressed;			// 6
-			'h046: btn_service <= ~pressed;	// 9
+		case(code)
+			'h16: btn_1p_start <= pressed; // 1
+			'h1E: btn_2p_start <= pressed; // 2
+			'h2E: btn_coin1    <= pressed; // 5
+			'h36: btn_coin2    <= pressed; // 6
+			'h46: btn_service  <= pressed; // 9
+
+			'h11: btn_fast     <= pressed; // alt
+			'h6B: btn_left     <= pressed; // left
+			'h74: btn_right    <= pressed; // right
+			'h29: btn_fire     <= pressed; // space						
 		endcase
 	end
 end
 
-
 //////////////////  Arcade Buttons/Interfaces   ///////////////////////////
 
-reg coin1 = 0;							// Active-HIGH.
-reg coin2 = 0;							// Active-HIGH.
-wire btn_shot = ~ps2_mouse[0];	// Active-LOW.
-reg btn_service = 1;					// Active-LOW.
-wire tilt = 1'b1;						// Active-LOW.
-reg btn_1p_start = 1;				// Active-LOW.
-reg btn_2p_start = 1;				// Active-LOW.
-
+wire m_fire   = btn_fire     | joy[4] | |ps2_mouse[1:0] | ~USER_IN[3];
+wire m_fast   = btn_fast     | joy[5];
+wire m_start1 = btn_1p_start | joy[6];
+wire m_start2 = btn_2p_start | joy[8];
+wire m_coin1  = btn_coin1    | joy[7];
+wire m_coin2  = btn_coin2;
+wire m_left   = btn_left     | joy[1];
+wire m_right  = btn_right    | joy[0];
 
 wire [7:0] dip_sw = {status[8], ~status[7:1]};	// Active-LOW
 /*DIP switches are in reverse order when compared to this table (sourced from MAME Arkanoid driver):
@@ -348,18 +374,18 @@ arkanoid arkanoid_inst
 
 	.clk_12m(CLK_12M),				// input clk_12m
 
-	.spinner(spinner_encoder),		// input [1:0] spinner
+	.spinner(use_io ? USER_IN[1:0] : spinner_encoder),	// input [1:0] spinner
 	
-	.coin1(coin1 | joy[7]),		   // input coin1
-	.coin2(coin2),	         	   // input coin2
+	.coin1(m_coin1),		         // input coin1
+	.coin2(m_coin2),	         	// input coin2
 	
-	.btn_shot(btn_shot & ~joy[4]),// input btn_shot
-	.btn_service(btn_service),		// input btn_service
+	.btn_shot(~m_fire),           // input btn_shot
+	.btn_service(~btn_service),	// input btn_service
 	
-	.tilt(tilt),						// input tilt
+	.tilt(1),  						   // input tilt
 	
-	.btn_1p_start(btn_1p_start & ~joy[6]),	// input btn_1p_start
-	.btn_2p_start(btn_2p_start & ~joy[8]),	// input btn_2p_start
+	.btn_1p_start(~m_start1),	   // input btn_1p_start
+	.btn_2p_start(~m_start2),	   // input btn_2p_start
 
 	.dip_sw(dip_sw),					// input [7:0] dip_sw
 	
