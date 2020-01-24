@@ -111,7 +111,7 @@ parameter CONF_STR = {
 	"H0OD,Orientation,Vert,Horz;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
-	"OIJ,Pad Control,Buttons,HiRes Spinner,Medium Spinner,LoRes Spinner;",
+	"D1OIJ,Pad Control,Buttons/Mouse,HiRes Spinner,Medium Spinner,LoRes Spinner;",
 	"-;",
 	"O12,Credits,1 coin 1 credit,2 coins 1 credit,1 coin 2 credits,1 coin 6 credits;",
 	"O3,Lives,3,5;",
@@ -156,7 +156,7 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.buttons(buttons),
 	.status(status),
-	.status_menumask(direct_video),
+	.status_menumask({use_io,direct_video}),
 	.forced_scandoubler(forced_scandoubler),
 	.gamma_bus(gamma_bus),
 	.direct_video(direct_video),
@@ -188,13 +188,12 @@ wire reset = buttons[1] | status[0] | ioctl_download;
 
 ////////////////////   Mouse controls by Enforcer   ///////////////////
 
-logic [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type encoder.  as it spins with will use the pattern 00, 01, 11, 10 and repeat.  when it spins the other way the pattern is reversed.
-
+reg [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type encoder.  as it spins with will use the pattern 00, 01, 11, 10 and repeat.  when it spins the other way the pattern is reversed.
 wire signed [8:0] mouse_x_in = $signed({ps2_mouse[4], ps2_mouse[15:8]});
 
 wire [11:0] spres = 12'd2<<(status[19:18] - !m_fast);
-
 reg use_io = 0; // 1 - use encoder on USER_IN[1:0] pins
+
 always @(posedge CLK_12M) begin
 	reg old_state;
 	reg [1:0] old_io;
@@ -202,7 +201,7 @@ always @(posedge CLK_12M) begin
 
 	reg signed  [8:0] mouse_x = 0;
 
-	logic signed [11:0] position = 0;
+	reg signed [11:0] position = 0;
 	reg        ce_6m;
 	reg [11:0] div_4k;
 
@@ -257,6 +256,30 @@ always @(posedge CLK_12M) begin
 
 	old_io <= USER_IN[1:0];
 	if(old_io != USER_IN[1:0]) use_io <= 1;
+end
+
+//Process to downgrade encoder pulses from 600 to 300 (Arkanoid Encoder original dps)
+//We use a 600 pulses AB Digital encoder
+
+reg [1:0] raw_encoder = 2'b11;
+wire encA = USER_IN[0];
+wire encB = USER_IN[1];
+always @(posedge CLK_12M) begin
+	reg encAr;
+
+	encAr <= encA;
+	if(encAr != encA) begin 
+		case({encA ^ encB, raw_encoder}) //If encoder moves, generate the signal depends of direction. 
+			{1'b1, 2'b00}: raw_encoder <= 2'b01;
+			{1'b1, 2'b01}: raw_encoder <= 2'b11;
+			{1'b1, 2'b11}: raw_encoder <= 2'b10;
+			{1'b1, 2'b10}: raw_encoder <= 2'b00;
+			{1'b0, 2'b00}: raw_encoder <= 2'b10;
+			{1'b0, 2'b10}: raw_encoder <= 2'b11;
+			{1'b0, 2'b11}: raw_encoder <= 2'b01;
+			{1'b0, 2'b01}: raw_encoder <= 2'b00;
+		endcase
+	end
 end
 
 ///////////////////         Keyboard           //////////////////
@@ -374,7 +397,7 @@ arkanoid arkanoid_inst
 
 	.clk_12m(CLK_12M),				// input clk_12m
 
-	.spinner(use_io ? USER_IN[1:0] : spinner_encoder),	// input [1:0] spinner
+	.spinner(use_io ? raw_encoder : spinner_encoder),	// input [1:0] spinner
 	
 	.coin1(m_coin1),		         // input coin1
 	.coin2(m_coin2),	         	// input coin2
