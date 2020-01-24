@@ -111,7 +111,7 @@ parameter CONF_STR = {
 	"H0OD,Orientation,Vert,Horz;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
-	"D1OIJ,Pad Control,Buttons/Mouse,HiRes Spinner,Medium Spinner,LoRes Spinner;",
+	"D1OIJ,Pad Control,Kbd/Joy/Mouse,HiRes Spinner,Medium Spinner,LoRes Spinner;",
 	"-;",
 	"O12,Credits,1 coin 1 credit,2 coins 1 credit,1 coin 2 credits,1 coin 6 credits;",
 	"O3,Lives,3,5;",
@@ -144,6 +144,8 @@ wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
 wire [15:0] joystick_0, joystick_1;
 wire [15:0] joy = joystick_0 | joystick_1;
+wire [15:0] joystick_analog_0, joystick_analog_1;
+wire  [7:0] joya = joystick_analog_0[7:0] ? joystick_analog_0[7:0] : joystick_analog_1[7:0];
 
 wire [21:0] gamma_bus;
 
@@ -168,6 +170,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 
 	.joystick_0(joystick_0),
 	.joystick_1(joystick_1),
+	.joystick_analog_0(joystick_analog_0),
+	.joystick_analog_1(joystick_analog_1),
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse)
 );
@@ -189,31 +193,23 @@ wire reset = buttons[1] | status[0] | ioctl_download;
 ////////////////////   Mouse controls by Enforcer   ///////////////////
 
 reg [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type encoder.  as it spins with will use the pattern 00, 01, 11, 10 and repeat.  when it spins the other way the pattern is reversed.
-wire signed [8:0] mouse_x_in = $signed({ps2_mouse[4], ps2_mouse[15:8]});
 
 wire [11:0] spres = 12'd2<<(status[19:18] - !m_fast);
 reg use_io = 0; // 1 - use encoder on USER_IN[1:0] pins
 
 always @(posedge CLK_12M) begin
-	reg old_state;
-	reg [1:0] old_io;
-	integer spin_counter;
-
-	reg signed  [8:0] mouse_x = 0;
-
-	reg signed [11:0] position = 0;
+	reg [15:0] spin_counter;
+	reg        old_state;
+	reg  [1:0] old_io;
+	reg [11:0] position = 0;
 	reg        ce_6m;
 	reg [11:0] div_4k;
 
 	ce_6m <= ~ce_6m;
-	
 	if(ce_6m) begin
 	
 		div_4k <= div_4k + 1'd1;
 		if(div_4k == 1499) div_4k <= 0;
-
-		old_state <= ps2_mouse[24];    
-		mouse_x <= mouse_x_in;
 
 		if(position != 0) begin //we need to drive position to 0 still;
 			if(!div_4k) begin
@@ -233,17 +229,33 @@ always @(posedge CLK_12M) begin
 			end
 		end
 
-		if(ps2_mouse[24] & (old_state != ps2_mouse[24])) begin
-			if({position[11], mouse_x[8]}) position <= position + mouse_x;
-			else position <= mouse_x;
+		old_state <= ps2_mouse[24];
+		if(old_state != ps2_mouse[24]) begin
 			use_io <= 0;
+			if(!(^position[11:10])) position <= position + {{4{ps2_mouse[4]}}, ps2_mouse[15:8]};
 		end
 
-		if (m_left | m_right) begin // 0.167us per cycle
-			use_io <= 0;
-			if(status[19:18]) begin
+		if(status[19:18]) begin
+			//USB Spinner using left/right pulses
+			if (m_left | m_right) begin
+				use_io <= 0;
 				position <= m_right ? spres : -spres;
-			end else if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
+			end
+		end
+		else if (joya) begin
+			//Analog X - variable speed depending on angle
+			use_io <= 0;
+			if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
+				position <= joya[7:4] ? {{8{joya[7]}}, joya[7:4]} : 12'd1; //joya[7] ? -aspd : aspd;
+				spin_counter <= 0;
+			end else begin
+				spin_counter <= spin_counter + 1'b1;
+			end
+		end
+		else if (m_left | m_right) begin // 0.167us per cycle
+			// DPAD left/right
+			use_io <= 0;
+			if (spin_counter == 'd48000) begin// roughly 8ms to emulate 125hz standard mouse poll rate
 				position <= m_right ? (m_fast ? 12'd9 : 12'd4) : (m_fast ? -12'd9 : -12'd4);
 				spin_counter <= 0;
 			end else begin
