@@ -111,7 +111,8 @@ parameter CONF_STR = {
 	"H0OD,Orientation,Vert,Horz;",
 	"OFH,Scandoubler Fx,None,HQ2x,CRT 25%,CRT 50%,CRT 75%;",
 	"-;",
-	"D1OIJ,Pad Control,Kbd/Joy/Mouse,HiRes Spinner,Medium Spinner,LoRes Spinner;",
+	"D1OK,Pad Control,Kbd/Joy/Mouse,Spinner;",
+	"D1OIJ,Spinner Resolution,High,Medium,Low;",
 	"-;",
 	"O12,Credits,1 coin 1 credit,2 coins 1 credit,1 coin 2 credits,1 coin 6 credits;",
 	"O3,Lives,3,5;",
@@ -142,8 +143,8 @@ wire  [7:0] ioctl_dout;
 
 wire [10:0] ps2_key;
 wire [24:0] ps2_mouse;
-wire [15:0] joystick_0, joystick_1;
-wire [15:0] joy = joystick_0 | joystick_1;
+wire [31:0] joystick_0, joystick_1;
+wire [31:0] joy = joystick_0 | joystick_1;
 wire [15:0] joystick_analog_0, joystick_analog_1;
 wire  [7:0] joya = joystick_analog_0[7:0] ? joystick_analog_0[7:0] : joystick_analog_1[7:0];
 
@@ -194,7 +195,7 @@ wire reset = buttons[1] | status[0] | ioctl_download;
 
 reg [1:0] spinner_encoder = 2'b11; //spinner encoder is a standard AB type encoder.  as it spins with will use the pattern 00, 01, 11, 10 and repeat.  when it spins the other way the pattern is reversed.
 
-wire [11:0] spres = 12'd2<<(status[19:18] - !m_fast);
+wire [11:0] spres = 12'd2<<(status[19:18] - !m_fast + 1'd1);
 reg use_io = 0; // 1 - use encoder on USER_IN[1:0] pins
 
 always @(posedge CLK_12M) begin
@@ -204,6 +205,10 @@ always @(posedge CLK_12M) begin
 	reg [11:0] position = 0;
 	reg        ce_6m;
 	reg [11:0] div_4k;
+	reg        use_sp = 0;
+	
+	if(joy[31:30]) use_sp <= 1;
+	if(m_left | m_right) use_sp <= 0;
 
 	ce_6m <= ~ce_6m;
 	if(ce_6m) begin
@@ -235,11 +240,11 @@ always @(posedge CLK_12M) begin
 			if(!(^position[11:10])) position <= position + {{4{ps2_mouse[4]}}, ps2_mouse[15:8]};
 		end
 
-		if(status[19:18]) begin
+		if(status[20] | use_sp) begin
 			//USB Spinner using left/right pulses
-			if (m_left | m_right) begin
+			if (m_left | m_right | |joy[31:30]) begin
 				use_io <= 0;
-				position <= m_right ? spres : -spres;
+				position <= (m_right | joy[31]) ? spres : -spres;
 			end
 		end
 		else if (joya) begin
