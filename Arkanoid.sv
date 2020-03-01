@@ -150,6 +150,8 @@ wire  [7:0] joya = joystick_analog_0[7:0] ? joystick_analog_0[7:0] : joystick_an
 
 wire [21:0] gamma_bus;
 
+wire  [8:0] sp0, sp1;
+
 hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 (
 	.clk_sys(CLK_12M),
@@ -173,6 +175,8 @@ hps_io #(.STRLEN($size(CONF_STR)>>3)) hps_io
 	.joystick_1(joystick_1),
 	.joystick_analog_0(joystick_analog_0),
 	.joystick_analog_1(joystick_analog_1),
+	.spinner_0(sp0),
+	.spinner_1(sp1),
 	.ps2_key(ps2_key),
 	.ps2_mouse(ps2_mouse)
 );
@@ -206,13 +210,21 @@ always @(posedge CLK_12M) begin
 	reg        ce_6m;
 	reg [11:0] div_4k;
 	reg        use_sp = 0;
-	
-	if(joy[31:30]) use_sp <= 1;
-	if(m_left | m_right) use_sp <= 0;
+	reg  [1:0] old_emu_sp = 0;
+	reg  [1:0] new_emu_sp = 0;
+	reg  [1:0] old_sp = 0;
+	reg  [1:0] new_sp = 0;
+
+	new_emu_sp <= {m_right,m_left};
+	new_sp <= {sp1[8],sp0[8]};
 
 	ce_6m <= ~ce_6m;
 	if(ce_6m) begin
 	
+		old_sp <= new_sp;
+		if(new_sp ^ old_sp) use_sp <= 1;
+		if(new_emu_sp) use_sp <= 0;
+
 		div_4k <= div_4k + 1'd1;
 		if(div_4k == 1499) div_4k <= 0;
 
@@ -240,11 +252,26 @@ always @(posedge CLK_12M) begin
 			if(!(^position[11:10])) position <= position + {{4{ps2_mouse[4]}}, ps2_mouse[15:8]};
 		end
 
-		if(status[20] | use_sp) begin
-			//USB Spinner using left/right pulses
-			if (m_left | m_right | |joy[31:30]) begin
+		if(use_sp) begin
+			if(old_sp[0] ^ new_sp[0]) begin
 				use_io <= 0;
-				position <= (m_right | joy[31]) ? spres : -spres;
+				position <= position + ($signed(sp0[7:0])*$signed(spres));
+			end
+			if(old_sp[1] ^ new_sp[1]) begin
+				use_io <= 0;
+				position <= position + ($signed(sp1[7:0])*$signed(spres));
+			end
+		end
+		else if(status[20]) begin
+			old_emu_sp <= new_emu_sp;
+			//USB Spinner using left/right pulses
+			if (~old_emu_sp[1] & new_emu_sp[1]) begin
+				use_io <= 0;
+				position <= spres;
+			end
+			if (~old_emu_sp[0] & new_emu_sp[0]) begin
+				use_io <= 0;
+				position <= -spres;
 			end
 		end
 		else if (joya) begin
