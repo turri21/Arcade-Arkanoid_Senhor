@@ -189,6 +189,7 @@ parameter CONF_STR = {
 	"-;",
 	"D1OK,Pad Control,Kbd/Joy/Mouse,Spinner;",
 	"D1OIJ,Spinner Resolution,High,Medium,Low;",
+	"O1,SNAC Spinner,Disable,Enable;",
 	"-;",
 	"DIP;",
 	"OB,Sound chip,YM2149,AY-3-8910;",
@@ -374,6 +375,7 @@ always @(posedge CLK_12M) begin
 
 	old_io <= USER_IN[1:0];
 	if(old_io != USER_IN[1:0]) use_io <= 1;
+	if(!status[1]) use_io <= 0;
 end
 
 //Process to downgrade encoder pulses from 600 to 300 (Arkanoid Encoder original dps)
