@@ -466,7 +466,7 @@ end
 
 //////////////////  Arcade Buttons/Interfaces   ///////////////////////////
 
-wire m_fire   = btn_fire     | joy[4] | |ps2_mouse[1:0] | ~USER_IN[3];
+wire m_fire   = btn_fire     | joy[4] | |ps2_mouse[1:0] | (use_io & ~USER_IN[3]);
 wire m_fast   = btn_fast     | joy[5];
 wire m_start1 = btn_1p_start | joy[6];
 wire m_start2 = btn_2p_start | joy[8];
