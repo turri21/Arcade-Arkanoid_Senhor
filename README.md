@@ -1,3 +1,8 @@
+-=(Arkanoid_Senhor notes)=-
+
+Tested: Working Video 720p, 1080p & Sound.
+
+___
 # Arkanoid for [MiSTer](https://github.com/MiSTer-devel/Main_MiSTer/wiki)
 An FPGA implementation of Arkanoid by Ace, ElectronAsh, Enforcer, Sorgelig, Kitrinx and JimmyStones
 
